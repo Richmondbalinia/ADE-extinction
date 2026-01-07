@@ -1,0 +1,147 @@
+# We will generate four plots analogous to the user's Julia-generated figures using Python and matplotlib.
+# Adhering to constraints: use matplotlib, no seaborn, one chart per figure, do not set specific colors or styles explicitly.
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Figure 1: Extinction Action Landscape (approximation like given surrogate S_approx)
+np.random.seed(0)
+n_grid = 30
+I1_range = np.linspace(0.001, 0.02, n_grid)
+I2_range = np.linspace(0.001, 0.02, n_grid)
+I1_grid, I2_grid = np.meshgrid(I1_range, I2_range)
+
+eta_12 = 2.0  # representative cross-term as in example
+action_vals = 1000*(I1_grid**2 + I2_grid**2 + eta_12*I1_grid*I2_grid)
+
+# add minima
+minima_positions = [(0.005, 0.005), (0.015, 0.001), (0.001, 0.015)]
+for I1, I2 in minima_positions:
+    i = np.argmin(np.abs(I1_range - I1))
+    j = np.argmin(np.abs(I2_range - I2))
+    action_vals[j, i] -= 0.5
+
+fig1 = plt.figure()
+ax1 = fig1.add_subplot(111, projection='3d')
+ax1.plot_surface(I1_grid, I2_grid, action_vals)
+ax1.set_xlabel("x_I1")
+ax1.set_ylabel("x_I2")
+ax1.set_zlabel("S(x)")
+ax1.set_title("Extinction Action Landscape for Three Serotypes")
+fig1.savefig("/mnt/data/figure1_action_landscape.png", dpi=300)
+plt.close(fig1)
+
+# Figure 2: Dominant Extinction Pathways (simple network-style visualization using scatter + annotations)
+# We'll produce a schematic by placing nodes in 2D and drawing arrows.
+import math
+
+nodes = ["None", "D4", "D2", "Z", "D1", "D3", "D1D2", "All"]
+positions = {
+    "None": (0.1, 0.8),
+    "D4": (0.3, 0.8),
+    "D2": (0.5, 0.8),
+    "Z": (0.5, 0.6),
+    "D1": (0.3, 0.6),
+    "D3": (0.7, 0.6),
+    "D1D2": (0.4, 0.4),
+    "All": (0.5, 0.2)
+}
+transitions = [
+    ("None", "D4"),
+    ("None", "D2"),
+    ("D4", "D2"),
+    ("D2", "Z"),
+    ("Z", "D1"),
+    ("D1", "D3"),
+    ("D4", "D1D2"),
+    ("D1D2", "All"),
+    ("D3", "All")
+]
+
+fig2, ax2 = plt.subplots()
+for n in nodes:
+    x, y = positions[n]
+    ax2.scatter([x], [y])
+    ax2.text(x, y+0.02, n, ha='center')
+
+for src, dst in transitions:
+    x1, y1 = positions[src]
+    x2, y2 = positions[dst]
+    ax2.annotate("", xy=(x2, y2), xytext=(x1, y1), arrowprops=dict(arrowstyle="->"))
+
+ax2.set_title("Dominant Extinction Pathways")
+ax2.set_xlim(0, 1)
+ax2.set_ylim(0, 1)
+fig2.savefig("/mnt/data/figure2_extinction_pathways.png", dpi=300)
+plt.close(fig2)
+
+# Figure 3: Phase Diagram (filled contour to represent 3 regions)
+eta_range = np.linspace(1.0, 5.0, 100)
+beta_range = np.linspace(0.1, 1.0, 100)
+ETA, BETA = np.meshgrid(eta_range, beta_range)
+
+def regime_boundary_I_II(eta, beta):
+    return 0.1*np.exp(2*eta)/(1+0.5*beta)
+
+def regime_boundary_II_III(eta, beta):
+    return 0.05*np.exp(3*eta)/(1+0.3*beta)
+
+phase = np.zeros_like(ETA)
+for i in range(ETA.shape[0]):
+    for j in range(ETA.shape[1]):
+        b_I_II = regime_boundary_I_II(ETA[i, j], BETA[i, j])
+        b_II_III = regime_boundary_II_III(ETA[i, j], BETA[i, j])
+        if BETA[i, j] < b_I_II:
+            phase[i, j] = 1
+        elif BETA[i, j] < b_II_III:
+            phase[i, j] = 2
+        else:
+            phase[i, j] = 3
+
+fig3 = plt.figure()
+ax3 = fig3.add_subplot(111)
+cf = ax3.contourf(eta_range, beta_range, phase)
+ax3.set_xlabel("Average ADE Factor (eta)")
+ax3.set_ylabel("Average Transmission Rate (beta)")
+ax3.set_title("Phase Diagram of Extinction Regimes")
+fig3.savefig("/mnt/data/figure3_phase_diagram.png", dpi=300)
+plt.close(fig3)
+
+# Figure 4: Action vs. ADE Asymmetry
+def generate_ade_matrix(alpha, n=5):
+    base = np.random.rand(n, n)*2 + 1
+    np.fill_diagonal(base, 1.0)
+    sym = (base + base.T)/2
+    anti = (base - base.T)/2
+    eta = sym + alpha*anti
+    eta = np.maximum(eta, 1.0)
+    return eta
+
+def compute_pathogen_actions(eta_matrix, base_actions):
+    n = eta_matrix.shape[0]
+    actions = np.zeros(n)
+    for i in range(n):
+        incoming = np.sum(eta_matrix[:, i]) - 1
+        outgoing = np.sum(eta_matrix[i, :]) - 1
+        actions[i] = base_actions[i]*(1 + 0.2*incoming - 0.1*outgoing)
+    return actions
+
+alpha_range = np.linspace(0, 1, 50)
+base_actions = np.array([1.0, 1.2, 0.9, 1.3, 0.8])
+actions_store = np.zeros((5, len(alpha_range)))
+
+for k, a in enumerate(alpha_range):
+    eta_mat = generate_ade_matrix(a)
+    acts = compute_pathogen_actions(eta_mat, base_actions)
+    actions_store[:, k] = acts
+
+fig4 = plt.figure()
+ax4 = fig4.add_subplot(111)
+for i in range(5):
+    ax4.plot(alpha_range, actions_store[i, :])
+ax4.set_xlabel("ADE Asymmetry Parameter (alpha)")
+ax4.set_ylabel("Extinction Action S")
+ax4.set_title("Extinction Action vs. ADE Asymmetry")
+fig4.savefig("/mnt/data/figure4_action_vs_asymmetry.png", dpi=300)
+plt.close(fig4)
+
